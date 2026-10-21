@@ -29,7 +29,11 @@ import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 
 import { type FacilitatorSignerProvider } from "./facilitatorSigner.js";
 import { parseVerifyPaymentRequest } from "./paymentPayload.js";
-import { createX402StellarAdapter, type X402VerificationInput } from "./x402Adapter.js";
+import {
+  createX402StellarAdapter,
+  transactionHashFromXdr,
+  type X402VerificationInput
+} from "./x402Adapter.js";
 
 const config = loadConfig({ STELLAR_TESTNET_USDC_CONTRACT_ID: testAssetContractId });
 const normalizedRequest = parseVerifyPaymentRequest(testPaymentRequest, config);
@@ -67,6 +71,33 @@ describe("default x402 Stellar adapter", () => {
       valid: false
     });
     expect(adapter.settleExact).toBeUndefined();
+  });
+});
+
+describe("transactionHashFromXdr", () => {
+  it("derives the network transaction hash from a signed transaction envelope", () => {
+    const payer = Keypair.random();
+    const account = new Account(payer.publicKey(), "0");
+    const transaction = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: testAssetContractId,
+          function: "transfer",
+          args: [nativeToScVal(payer.publicKey(), { type: "address" })]
+        })
+      )
+      .setTimeout(60)
+      .build();
+
+    expect(transactionHashFromXdr(transaction.toXDR(), Networks.TESTNET)).toBe(
+      transaction.hash().toString("hex")
+    );
+    expect(transactionHashFromXdr(transaction.toXDR(), Networks.PUBLIC)).not.toBe(
+      transaction.hash().toString("hex")
+    );
   });
 });
 

@@ -1,6 +1,7 @@
 import { type AppConfig, type ErrorCode } from "@lumenbazaar/shared";
 import { type SettleResponse, type VerifyResponse } from "@x402/core/types";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
+import * as StellarSdk from "@stellar/stellar-sdk";
 
 import { type FacilitatorSignerProvider } from "./facilitatorSigner.js";
 import {
@@ -69,6 +70,11 @@ export type X402StellarAdapterOptions = {
     transactionHash: string;
   }) => Promise<SettlementFinality>;
 };
+
+export function transactionHashFromXdr(transactionXdr: string, networkPassphrase: string) {
+  const transaction = StellarSdk.TransactionBuilder.fromXDR(transactionXdr, networkPassphrase);
+  return transaction.hash().toString("hex");
+}
 
 export function createX402StellarAdapter(options?: X402StellarAdapterOptions): X402StellarAdapter {
   if (options !== undefined) {
