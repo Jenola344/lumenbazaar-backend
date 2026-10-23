@@ -27,11 +27,15 @@ import { type PaymentPayload, type PaymentRequirements } from "@x402/core/types"
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 
-import { type FacilitatorSignerProvider } from "./facilitatorSigner.js";
+import {
+  type FacilitatorSignerProvider,
+  type FacilitatorStellarSigner
+} from "./facilitatorSigner.js";
 import { parseVerifyPaymentRequest } from "./paymentPayload.js";
 import {
   createX402StellarAdapter,
   transactionHashFromXdr,
+  wrapSignerForSubmissionIntent,
   type X402VerificationInput
 } from "./x402Adapter.js";
 
@@ -98,6 +102,38 @@ describe("transactionHashFromXdr", () => {
     expect(transactionHashFromXdr(transaction.toXDR(), Networks.PUBLIC)).not.toBe(
       transaction.hash().toString("hex")
     );
+  });
+
+  it("does not return the signed transaction until submission intent is persisted", async () => {
+    const payer = Keypair.random();
+    const transaction = new TransactionBuilder(new Account(payer.publicKey(), "0"), {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: testAssetContractId,
+          function: "transfer",
+          args: [nativeToScVal(payer.publicKey(), { type: "address" })]
+        })
+      )
+      .setTimeout(60)
+      .build();
+    transaction.sign(payer);
+    const persistIntent = vi.fn(async () => {
+      throw new Error("intent persistence failed");
+    });
+    const signer = {
+      address: payer.publicKey(),
+      signAuthEntry: vi.fn(),
+      signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: transaction.toXDR() })
+    } as unknown as FacilitatorStellarSigner;
+    const wrapped = wrapSignerForSubmissionIntent(signer, Networks.TESTNET, persistIntent);
+
+    await expect(
+      wrapped.signTransaction(transaction.toXDR(), { networkPassphrase: Networks.TESTNET })
+    ).rejects.toThrow("intent persistence failed");
+    expect(persistIntent).toHaveBeenCalledWith(transaction.hash().toString("hex"));
   });
 });
 

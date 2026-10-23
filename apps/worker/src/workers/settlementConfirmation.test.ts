@@ -594,12 +594,21 @@ describe("settlementConfirmation worker", () => {
           correlationId: "corr_settling_2",
           network: "stellar:testnet",
           settlement: null
+        },
+        {
+          id: "attempt_submitted_after_crash",
+          correlationId: "corr_submitted_3",
+          network: "stellar:testnet",
+          settlement: {
+            id: "settlement_submitted_3",
+            transactionHash: "tx_submitted_before_crash"
+          }
         }
       ]);
 
       const count = await resumePendingSettlements(db, mockQueue);
 
-      expect(count).toBe(2);
+      expect(count).toBe(3);
       expect(rawDb.paymentAttempt.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -621,7 +630,17 @@ describe("settlementConfirmation worker", () => {
           }
         })
       );
-      expect(mockQueue.add).toHaveBeenCalledTimes(2);
+      expect(mockQueue.add).toHaveBeenCalledTimes(3);
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        "settlement-confirmation",
+        expect.objectContaining({
+          paymentAttemptId: "attempt_submitted_after_crash",
+          settlementId: "settlement_submitted_3",
+          transactionHash: "tx_submitted_before_crash",
+          network: "stellar:testnet"
+        }),
+        expect.any(Object)
+      );
     });
   });
 
