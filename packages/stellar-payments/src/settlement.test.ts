@@ -128,9 +128,11 @@ describe("SettlementService", () => {
     const attemptStore = new InMemoryPaymentAttemptStore();
     const settlementStore = new InMemorySettlementStore();
     const receiptService = new ReceiptService();
+    let submittedToNetwork = 0;
     const settleExact = vi.fn(async (input: Parameters<NonNullable<X402StellarAdapter["settleExact"]>>[0]) => {
       await input.onTransactionPrepared?.("tx_crash_window");
-      throw new Error("simulated crash after durable submission intent");
+      submittedToNetwork += 1;
+      throw new Error("simulated crash after network submission");
     });
     const crashAdapter: X402StellarAdapter = {
       async verifyExact() {
@@ -165,7 +167,7 @@ describe("SettlementService", () => {
     });
 
     await expect(settlement.settle(testPaymentRequest)).rejects.toThrow(
-      "simulated crash after durable submission intent"
+      "simulated crash after network submission"
     );
     await expect(settlement.settle(testPaymentRequest)).rejects.toMatchObject({
       code: "SETTLEMENT_FAILED",
@@ -174,6 +176,7 @@ describe("SettlementService", () => {
     });
 
     expect(settleExact).toHaveBeenCalledTimes(1);
+    expect(submittedToNetwork).toBe(1);
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         paymentAttemptId: verified.paymentAttemptId,

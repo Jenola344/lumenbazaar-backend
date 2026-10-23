@@ -138,7 +138,7 @@ export class SettlementService {
       }
       if (
         existingSettlement.status === "submitted" ||
-        (existingSettlement.status === "timed_out" &&
+        ((existingSettlement.status === "timed_out" || existingSettlement.status === "failed") &&
           existingSettlement.reconciliationState === "pending")
       ) {
         if (
@@ -196,11 +196,10 @@ export class SettlementService {
 
     let preparedTransactionHash: string | undefined;
     const adapterResult = await this.settleWithAdapter(normalized, async (transactionHash) => {
-      preparedTransactionHash = transactionHash;
       if (this.statePersistence === undefined) {
         return;
       }
-      await this.statePersistence.recordSubmission({
+      const intent = await this.statePersistence.recordSubmission({
         attempt,
         settlement: {
           correlationId: attempt.correlationId,
@@ -216,6 +215,28 @@ export class SettlementService {
           reconciliationState: "pending"
         }
       });
+      try {
+        await this.reconciliationScheduler?.enqueue({
+          correlationId: attempt.correlationId,
+          paymentAttemptId: attempt.id,
+          settlementId: intent.settlement.id,
+          transactionHash,
+          network: normalized.network
+        });
+      } catch {
+        try {
+          await this.auditLogService?.record({
+            action: "payment.settlement.reconciliation_enqueue_failed",
+            actorType: "system",
+            targetId: intent.settlement.id,
+            targetType: "settlement",
+            metadata: { paymentAttemptId: attempt.id }
+          });
+        } catch {
+          // Durable intent and startup scanning remain the recovery path.
+        }
+      }
+      preparedTransactionHash = transactionHash;
     }).then((result) =>
       result.transactionHash === undefined && preparedTransactionHash !== undefined
         ? { ...result, transactionHash: preparedTransactionHash }
@@ -320,7 +341,10 @@ export class SettlementService {
         };
       }
     }
-    if (settlement?.status === "failed" || settlement?.status === "timed_out") {
+    if (
+      (settlement?.status === "failed" || settlement?.status === "timed_out") &&
+      !(settlement.transactionHash !== null && settlement.reconciliationState === "pending")
+    ) {
       throw new LumenError(
         settlementFailureCode(attempt.failureCode),
         attempt.failureReason ?? "Stellar settlement failed.",

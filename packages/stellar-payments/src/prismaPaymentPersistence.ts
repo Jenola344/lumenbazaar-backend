@@ -281,6 +281,29 @@ export class PrismaPaymentStatePersistence implements PaymentStatePersistence {
         const existingSettlement = await tx.settlement.findUnique({
           where: { paymentAttemptId: input.attempt.id }
         });
+        const currentAttemptRow = await tx.paymentAttempt.findUnique({
+          where: { id: input.attempt.id }
+        });
+        const existingReceiptRow = await tx.receipt.findUnique({
+          where: { paymentAttemptId: input.attempt.id }
+        });
+        if (
+          currentAttemptRow?.status === "confirmed" &&
+          existingSettlement?.status === "confirmed" &&
+          existingSettlement.transactionHash === input.settlement.transactionHash &&
+          existingSettlement.ledger === input.settlement.ledger &&
+          existingReceiptRow?.status === "finalized" &&
+          existingReceiptRow.transactionHash === input.settlement.transactionHash &&
+          existingReceiptRow.ledger === input.settlement.ledger
+        ) {
+          const currentAttempt = mapPaymentAttempt(currentAttemptRow);
+          const settlement = mapSettlement(existingSettlement);
+          const receipt = mapReceipt(existingReceiptRow);
+          if (receipt.evidenceHash !== receiptEvidenceHash(currentAttempt, settlement)) {
+            throw new LumenError("REPLAY_DETECTED", "Finalized receipt evidence conflicts with settlement.");
+          }
+          return { attempt: currentAttempt, settlement, receipt };
+        }
         if (
           existingSettlement !== null &&
           existingSettlement.transactionHash !== input.settlement.transactionHash
@@ -301,7 +324,10 @@ export class PrismaPaymentStatePersistence implements PaymentStatePersistence {
                   status: "confirmed",
                   ledger: input.settlement.ledger,
                   settledAt: new Date(input.settlement.settledAt),
-                  reconciliationState: input.settlement.reconciliationState ?? "not_required",
+                  reconciliationState:
+                    existingSettlement.reconciliationState === "reconciled"
+                      ? "reconciled"
+                      : (input.settlement.reconciliationState ?? "not_required"),
                   reconciliationReason: null
                 }
               })
@@ -319,6 +345,13 @@ export class PrismaPaymentStatePersistence implements PaymentStatePersistence {
         const existingReceipt = await tx.receipt.findUnique({
           where: { paymentAttemptId: attempt.id }
         });
+        if (
+          existingReceipt !== null &&
+          existingReceipt.transactionHash !== null &&
+          existingReceipt.transactionHash !== settlement.transactionHash
+        ) {
+          throw new LumenError("REPLAY_DETECTED", "Receipt transaction hash conflicts with settlement.");
+        }
         if (existingReceipt !== null && existingReceipt.status === "finalized") {
           const expectedEvidenceHash = receiptEvidenceHash(attempt, settlement);
           if (
@@ -421,7 +454,10 @@ export class PrismaPaymentStatePersistence implements PaymentStatePersistence {
                 where: { id: existingSettlement.id },
                 data: {
                   status: input.settlement.status,
-                  reconciliationState: input.settlement.reconciliationState ?? "not_required",
+                  reconciliationState:
+                    existingSettlement.transactionHash !== null
+                      ? existingSettlement.reconciliationState
+                      : (input.settlement.reconciliationState ?? "not_required"),
                   reconciliationReason: input.failureReason
                 }
               })

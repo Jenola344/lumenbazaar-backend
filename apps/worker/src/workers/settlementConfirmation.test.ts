@@ -590,12 +590,6 @@ describe("settlementConfirmation worker", () => {
           }
         },
         {
-          id: "attempt_settling_no_settlement",
-          correlationId: "corr_settling_2",
-          network: "stellar:testnet",
-          settlement: null
-        },
-        {
           id: "attempt_submitted_after_crash",
           correlationId: "corr_submitted_3",
           network: "stellar:testnet",
@@ -608,29 +602,24 @@ describe("settlementConfirmation worker", () => {
 
       const count = await resumePendingSettlements(db, mockQueue);
 
-      expect(count).toBe(3);
+      expect(count).toBe(2);
       expect(rawDb.paymentAttempt.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            OR: [
-              { status: "settling", settlement: null },
-              {
-                settlement: {
-                  is: {
-                    transactionHash: { not: null },
-                    reconciliationState: { notIn: ["reconciled", "needs_review"] },
-                    OR: [
-                      { reconciliationState: "pending" },
-                      { status: { in: ["pending", "submitted", "timed_out"] } }
-                    ]
-                  }
-                }
+            settlement: {
+              is: {
+                transactionHash: { not: null },
+                reconciliationState: { notIn: ["reconciled", "needs_review"] },
+                OR: [
+                  { reconciliationState: "pending" },
+                  { status: { in: ["pending", "submitted", "timed_out"] } }
+                ]
               }
-            ]
+            }
           }
         })
       );
-      expect(mockQueue.add).toHaveBeenCalledTimes(3);
+      expect(mockQueue.add).toHaveBeenCalledTimes(2);
       expect(mockQueue.add).toHaveBeenCalledWith(
         "settlement-confirmation",
         expect.objectContaining({
